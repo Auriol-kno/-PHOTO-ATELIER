@@ -250,5 +250,5 @@ document.addEventListener('change',async e=>{
   t.value='';
  }
 });
-if('serviceWorker' in navigator && location.protocol==='https:') navigator.serviceWorker.register('/sw.js').catch(()=>{});
+if('serviceWorker' in navigator && location.protocol==='https:') navigator.serviceWorker.register('./sw.js').catch(()=>{});
 refresh();

@@ -2,14 +2,14 @@
   "name": "PHOTO ATELIER · Mobile",
   "short_name": "PHOTO ATELIER",
   "description": "Fotografia, kolory, nauka i własne materiały",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#161a18",
   "theme_color": "#161a18",
   "icons": [
     {
-      "src": "/icons/photo-atelier.svg",
+      "src": "./icons/photo-atelier.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
