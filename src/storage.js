@@ -20,9 +20,12 @@ async function transaction(mode, execute) {
     return await new Promise((resolve,reject)=>{
       const t=db.transaction('assets',mode);
       const req=execute(t.objectStore('assets'));
-      req.onsuccess=()=>resolve(req.result);
+      let result;
+      req.onsuccess=()=>{result=req.result;};
       req.onerror=()=>reject(req.error);
+      t.onerror=()=>reject(t.error);
       t.onabort=()=>reject(t.error);
+      t.oncomplete=()=>resolve(result);
     });
   } finally { db.close(); }
 }
@@ -74,9 +77,11 @@ export async function catalogueBackup() {
 }
 export async function restoreCatalogue(data) {
   if (!data||data.format!=='photo-atelier-catalogue-v1'||!Array.isArray(data.assets)) throw new Error('Nieznany format katalogu');
-  for (const a of data.assets) {
+  const existing=new Map((await listAssets()).map(a=>[a.id,a]));
+  for (const a of data.assets.slice(0,10000)) {
     if (typeof a.id!=='string'||typeof a.name!=='string'||typeof a.size!=='number') continue;
-    await upsertAsset({id:a.id,name:a.name.slice(0,500),size:a.size,modified:Number(a.modified)||0,kind:String(a.kind||'Materiał'),type:String(a.type||''),source:String(a.source||'Katalog importowany'),imported:String(a.imported||''),originalStored:false,originalSync:false,preview:null});
+    const prior=existing.get(a.id);
+    await upsertAsset({id:a.id,name:a.name.slice(0,500),size:a.size,modified:Number(a.modified)||0,kind:String(a.kind||'Materiał'),type:String(a.type||''),source:String(a.source||'Katalog importowany'),imported:String(a.imported||''),originalStored:false,originalSync:false,preview:prior?.preview??null});
   }
   return data.assets.length;
 }

@@ -7,10 +7,10 @@ Mobile-first fotografia · Nikon Zf · Lightroom Classic · Color Science.
 ## Start (Windows / macOS / Linux)
 
 W katalogu repozytorium:
-\`\`\`bash
+```bash
 python -m http.server 4173
-\`\`\`
-Otwórz \`http://localhost:4173\`.
+```
+Otwórz `http://localhost:4173`.
 
 Na iPhone aplikacja webowa wymaga wdrożenia HTTPS. To **nie jest** jeszcze opublikowany adres aplikacji. Nie wdrażamy publicznie bez zgody właściciela.
 
@@ -19,7 +19,7 @@ Na iPhone aplikacja webowa wymaga wdrożenia HTTPS. To **nie jest** jeszcze opub
 - Nawigacja: 12 modułów oraz osobny ekran **Pliki i chmura**.
 - Import z systemowego selektora plików (iOS Files/iCloud Drive, lokalne pliki i dostawcy obecni w systemowym pickerze).
 - Katalog metadanych i **małych miniatur** w IndexedDB; działa po odświeżeniu (dopóki przeglądarka nie usunie danych).
-- Rejestracja RAW \`.NEF\` jako pozycji katalogu **bez kopiowania oryginału ani renderowania RAW**.
+- Rejestracja RAW `.NEF` jako pozycji katalogu **bez kopiowania oryginału ani renderowania RAW**.
 - Podgląd JPG/PNG/WebP, prosty Compare Lab na jednym zdjęciu, style w formie **demonstracyjnych filtrów CSS**, portfolio miniatur.
 - Postęp Akademii i Photo Missions w pamięci lokalnej.
 - Eksport/import indeksu metadanych JSON (bez oryginałów, bez podglądów), demo receptury kolorystycznej JSON.
@@ -48,4 +48,4 @@ Oryginalne fotografie nie są domyślnie kopiowane do aplikacji ani wysyłane do
 
 ## Współpraca
 
-Kod rozwijamy przez osobne gałęzie i PR. Bez automatycznego scalenia do \`main\`. Nie dodawać prawdziwych prywatnych zdjęć, tokenów ani komercyjnych presetów do publicznego repozytorium.
+Kod rozwijamy przez osobne gałęzie i PR. Bez automatycznego scalenia do `main`. Nie dodawać prawdziwych prywatnych zdjęć, tokenów ani komercyjnych presetów do publicznego repozytorium.
