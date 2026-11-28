@@ -1,9 +1,11 @@
 import {listAssets,importFiles,deleteAsset,readableSize,catalogueBackup,restoreCatalogue} from './storage.js';
+import {BUILTIN_STYLES, BRAND_INFO, TONE_FIELDS, normalizeTone, cssFilter, percentageFromPointer, comparisonClip, validateSavedProfiles} from './catalog.js';
 
 const S={
  page:localStorage.getItem('pa-page')||'home',theme:localStorage.getItem('pa-theme')||'dark',
  brand:'Wszystkie',fileFilter:'Wszystkie',assets:[],imageUrls:new Map(),photoId:null,
- left:'hass-natural',right:'leica-classic',split:50,recipeContrast:0,recipeSaturation:0,
+ left:'hass-natural',right:'leica-classic',split:50,compareMode:'split',recipeContrast:0,recipeSaturation:0,
+ styleQuery:'',customStyles:[],editId:'hass-natural',editTone:null,editName:'',editBack:'styles',
  done:JSON.parse(localStorage.getItem('pa-done')||'[]'),
  missions:JSON.parse(localStorage.getItem('pa-missions')||'[]')
 };
@@ -13,17 +15,33 @@ const IMAGES={
  street:'https://images.unsplash.com/photo-1519608487953-e999c86e7455?w=850&q=80',
  film:'https://images.unsplash.com/photo-1470252649378-9c29740c9fa8?w=850&q=80'
 };
-const STYLES=[
- {id:'hass-natural',brand:'Hasselblad',title:'Natural Color',note:'HNCS-inspired · naturalna skóra i miękkie światła',image:'landscape',filter:'contrast(0.95) saturate(0.92) brightness(1.03)',type:'Inspiracja'},
- {id:'hass-nordic',brand:'Hasselblad',title:'Nordic Light',note:'Chłodne półtony i subtelna zieleń',image:'landscape',filter:'contrast(0.92) saturate(0.78) hue-rotate(5deg)',type:'Autorski'},
- {id:'hass-portrait',brand:'Hasselblad',title:'Portrait',note:'Miękka skóra i łagodne przejścia',image:'portrait',filter:'contrast(0.91) saturate(0.88) sepia(0.08)',type:'Autorski'},
- {id:'leica-classic',brand:'Leica',title:'Classic Color',note:'Reportażowy kontrast, wyraziste czerwienie',image:'street',filter:'contrast(1.15) saturate(0.92)',type:'Inspiracja'},
- {id:'leica-mono',brand:'Leica',title:'Monochrom',note:'Kontrastowa fotografia czarno-biała',image:'street',filter:'grayscale(1) contrast(1.12)',type:'Inspiracja'},
- {id:'kodak-portra',brand:'Kodak',title:'Portra 400',note:'Ciepłe półtony i pastelowe barwy',image:'portrait',filter:'sepia(.13) contrast(.92) saturate(.82)',type:'Inspiracja'},
- {id:'kodak-gold',brand:'Kodak',title:'Gold 200',note:'Słońce i analogowe ciepło',image:'film',filter:'sepia(.2) saturate(1.05) contrast(.98)',type:'Inspiracja'},
- {id:'fuji-chrome',brand:'Fujifilm',title:'Classic Chrome',note:'Dokumentalne, stonowane kolory',image:'street',filter:'contrast(1.08) saturate(.63) hue-rotate(-4deg)',type:'Inspiracja'},
- {id:'fuji-velvia',brand:'Fujifilm',title:'Velvia',note:'Nasycony pejzaż, błękit i zieleń',image:'landscape',filter:'contrast(1.1) saturate(1.3)',type:'Inspiracja'}
-];
+const STYLES=BUILTIN_STYLES;
+const OWN_KEY='pa-custom-profiles-v1';
+function loadCustomStyles(){
+  try {return validateSavedProfiles(JSON.parse(localStorage.getItem(OWN_KEY)||'[]'));}
+  catch {return [];}
+}
+S.customStyles=loadCustomStyles();
+function allStyles(){return [...STYLES,...S.customStyles];}
+function persistCustomStyles(){localStorage.setItem(OWN_KEY,JSON.stringify(S.customStyles));}
+function openEditor(id){
+  const current=style(id);
+  S.editId=current.id;
+  S.editTone=normalizeTone(current.tone);
+  S.editName=current.brand==='Moje profile'?current.title:current.title+' — mój';
+  S.editBack=S.page;
+  navTo('editor');
+}
+function buildCustomProfile(){
+  const base=style(S.editId);
+  const name=String(S.editName||'').trim().slice(0,70);
+  if(!name)return null;
+  const rawId=typeof crypto!=='undefined'&&crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);
+  return {id:'user-'+rawId,brand:'Moje profile',title:name,
+    note:'Własna interpretacja · baza: '+base.brand+' / '+base.title,
+    image:base.image,baseId:base.baseId||base.id,
+    tone:normalizeTone(S.editTone),type:'Autorski · lokalnie',source:'',verified:false,created:new Date().toISOString()};
+}
 const LESSONS=[
  ['Światło i ekspozycja','Ten sam kadr o trzech porach dnia'],
  ['Kompozycja i perspektywa','Pięć interpretacji jednej lokalizacji'],
@@ -56,11 +74,17 @@ const MODS=[
 const NAV=[['home','Start','⌂'],['styles','Style','◉'],['compare','Compare','◫'],['academy','Nauka','✦'],['more','Więcej','☷']];
 const root=document.getElementById('app'),tabs=document.getElementById('tabs');
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function style(id){return STYLES.find(s=>s.id===id)||STYLES[0];}
+function style(id){return allStyles().find(s=>s.id===id)||STYLES[0];}
 function navTo(page){S.page=page;localStorage.setItem('pa-page',page);draw();root.scrollTop=0;}
 function title(k,t,d){return '<div class="eyebrow">'+k+'</div><h1>'+t+'</h1><p class="sub">'+d+'</p>';}
 function btn(label,action,secondary){return '<button class="btn '+(secondary?'secondary':'')+'" data-act="'+action+'">'+label+'</button>';}
-function styleTile(s){return '<button class="style-card" data-act="choose-style" data-id="'+s.id+'"><span class="style-art" style="background-image:linear-gradient(0deg,#18231d55,#18231d22),url('+IMAGES[s.image]+');filter:'+s.filter+'"></span><span class="style-info"><b>'+esc(s.brand+' · '+s.title)+'</b><small>'+esc(s.note)+'</small></span></button>';}
+function styleTile(s){
+ return '<div class="style-card"><button class="style-picture" data-act="choose-style" data-id="'+esc(s.id)+'" aria-label="Porównaj '+esc(s.brand+' '+s.title)+'">'+
+ '<span class="style-art" style="background-image:linear-gradient(0deg,#18231d44,#18231d22),url('+IMAGES[s.image]+');filter:'+cssFilter(s.tone)+'"></span></button>'+
+ '<span class="style-info"><b>'+esc(s.brand+' · '+s.title)+'</b><small>'+esc(s.note)+'</small>'+
+ '<span class="style-meta">'+esc(s.brand==='Moje profile'?'Mój profil':'Inspired · preview')+'</span></span>'+
+ '<div class="style-actions"><button data-act="choose-style" data-id="'+esc(s.id)+'">Porównaj ↗</button><button data-act="edit-style" data-id="'+esc(s.id)+'">Dostosuj ✎</button></div></div>';
+}
 function card(k,v){return '<div class="stat"><strong>'+k+'</strong><small>'+v+'</small></div>';}
 function notice(t){return '<div class="notice">'+t+'</div>';}
 function home(){
@@ -73,12 +97,21 @@ function home(){
  '<div class="section-title"><h2>Wybrane style</h2><button class="link" data-act="styles">Zobacz całość →</button></div><div class="tiles">'+STYLES.slice(0,2).map(styleTile).join('')+'</div>'+
  notice('Tryb local-first: PHOTO ATELIER nie wysyła Twoich zdjęć na serwer. Ten prototyp zapisuje wyłącznie małe podglądy i metadane na urządzeniu.');
 }
+function styleResults(){
+ const q=S.styleQuery.trim().toLocaleLowerCase('pl');
+ const matching=allStyles().filter(s=>(S.brand==='Wszystkie'||s.brand===S.brand)&&(!q||[s.brand,s.title,s.note,s.family].join(' ').toLocaleLowerCase('pl').includes(q)));
+ return '<div class="row" style="margin-bottom:12px"><span class="tag">'+matching.length+' profili</span><span class="tiny">Podgląd demonstracyjny · CSS</span></div>'+
+ (matching.length?'<div class="tiles">'+matching.map(styleTile).join('')+'</div>':'<div class="drop"><b>Nie znaleziono profilu</b><small>Zmień markę lub wpisz inne słowo.</small></div>');
+}
 function stylesPage(){
- const brands=['Wszystkie','Hasselblad','Leica','Kodak','Fujifilm'];
- return title('STYLE LIBRARY','Color is a signature.','Profesjonalna biblioteka inspiracji. Rozróżniamy oryginalne profile, emulacje i style autorskie.')+
- '<div class="pills">'+brands.map(b=>'<button class="pill '+(b===S.brand?'active':'')+'" data-act="brand" data-value="'+b+'">'+b+'</button>').join('')+'</div>'+
- '<div class="tiles">'+STYLES.filter(s=>S.brand==='Wszystkie'||s.brand===S.brand).map(styleTile).join('')+'</div>'+
- notice('Widoczne wyglądy to wyłącznie demonstracyjne filtry CSS. Nie są kalibrowanymi emulacjami HNCS, Leica ani symulacjami rzeczywistych emulsji.');
+ const brands=['Wszystkie','Moje profile',...BRAND_INFO.map(x=>x.brand)];
+ return title('STYLE LIBRARY','The color signatures.','Rozszerzona kolekcja '+STYLES.length+' inspiracji z '+BRAND_INFO.length+' marek i systemów. Twórz własne warianty bez zmiany oryginału.')+
+ '<div class="stat-row">'+card(String(STYLES.length),'Inspiracji')+card(String(BRAND_INFO.length),'Marek')+card(String(S.customStyles.length),'Moich profili')+'</div>'+
+ '<div class="field" style="margin-top:17px"><label for="style-search">Szukaj po marce, nazwie i charakterze koloru</label><input class="text-input" id="style-search" type="search" placeholder="Np. Leica, Portret, Monochrom..." value="'+esc(S.styleQuery)+'"></div>'+
+ '<div class="pills brands-scroll">'+brands.map(b=>'<button class="pill '+(b===S.brand?'active':'')+'" data-act="brand" data-value="'+esc(b)+'">'+esc(b)+'</button>').join('')+'</div>'+
+ '<div id="style-results">'+styleResults()+'</div>'+
+ '<div class="btnrow" style="margin-top:18px">'+btn('Eksportuj moje profile JSON','export-profiles',true)+btn('Importuj moje profile','import-profiles',true)+'</div>'+
+ notice('Nazwy profili pochodzą z rodzin kolorystycznych producentów, lecz efekty zdjęć to autorskie wizualizacje CSS. Nie są to oficjalne presety, profile ICC/DCP ani skalibrowane kopie barw.');
 }
 function coverAsset(a) {
  const src=S.imageUrls.get(a.id);
@@ -107,21 +140,51 @@ function filesPage(){
  notice('Ważne: import RAW zapisuje obecnie tylko wpis w katalogu; oryginalny NEF nie jest kopiowany ani wywoływany. JPEG/PNG/WebP otrzymują niewielki podgląd, jeśli przeglądarka potrafi go utworzyć.');
 }
 function chosenPhoto(){return S.imageUrls.get(S.photoId)||IMAGES.landscape;}
+function updateSplitUI(){
+ const clip=comparisonClip(S.compareMode,S.split);
+ document.getElementById('after')?.style.setProperty('clip-path',clip);
+ document.getElementById('split-line')?.style.setProperty('left',S.split+'%');
+ document.getElementById('split-handle')?.style.setProperty('left',S.split+'%');
+ const control=document.getElementById('compare');
+ if(control&&S.compareMode==='split')control.setAttribute('aria-valuenow',String(S.split));
+ const range=document.getElementById('split-range');
+ if(range)range.value=String(S.split);
+}
 function compare(){
- const a=style(S.left),b=style(S.right);
+ const a=style(S.left),b=style(S.right),mode=S.compareMode;
  const photoOptions=S.assets.filter(x=>S.imageUrls.has(x.id));
- const select=(selected,selector)=>'<select class="select" data-select="'+selector+'">'+STYLES.map(s=>'<option value="'+s.id+'" '+(s.id===selected?'selected':'')+'>'+esc(s.brand+' · '+s.title)+'</option>').join('')+'</select>';
- return title('COMPARE LAB','The difference is in the details.','Porównuj dwie interpretacje na identycznym zdjęciu. Teraz: demonstracja efektów CSS.')+
- '<div class="row"><span class="tag">Przed / po</span><span class="badge">Symulacja UX — nieprofilowana</span></div>'+
- '<div class="compare" id="compare"><div class="layer" style="background-image:url('+chosenPhoto()+');filter:'+a.filter+'"></div>'+
- '<div class="layer after" id="after" style="background-image:url('+chosenPhoto()+');filter:'+b.filter+';clip-path:inset(0 0 0 '+S.split+'%)"></div>'+
- '<div class="divider" id="split-line" style="left:'+S.split+'%"></div><div class="handle" id="split-handle" style="left:'+S.split+'%">↔</div>'+
- '<span class="toplabel left">'+esc(a.brand)+'</span><span class="toplabel right">'+esc(b.brand)+'</span></div>'+
- '<input id="split-range" class="range" type="range" min="0" max="100" value="'+S.split+'" aria-label="Przesuwanie porównania">'+
- '<div class="tiles"><div class="field"><label>Styl A</label>'+select(S.left,'left')+'</div><div class="field"><label>Styl B</label>'+select(S.right,'right')+'</div></div>'+
+ const select=(selected,selector)=>'<select class="select" data-select="'+selector+'" aria-label="Wybierz profil '+selector+'">'+allStyles().map(s=>'<option value="'+esc(s.id)+'" '+(s.id===selected?'selected':'')+'>'+esc(s.brand+' · '+s.title)+'</option>').join('')+'</select>';
+ const viewControl='<div class="compare-switch" role="group" aria-label="Tryb porównywania">'+
+   [['a','◂ A','Pokaż tylko profil A'],['split','◫ A/B','Przesuń linię podziału'],['b','B ▸','Pokaż tylko profil B']].map(([v,label,description])=>
+    '<button class="compare-choice '+(v===mode?'active':'')+'" data-act="compare-mode" data-value="'+v+'" aria-label="'+description+'" aria-pressed="'+(v===mode?'true':'false')+'">'+label+'</button>').join('')+'</div>';
+ const aria=mode==='split'?'role="slider" aria-label="Porównanie A/B. Przesuń w poziomie palcem lub klawiszami strzałek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+S.split+'" tabindex="0"':'role="img" aria-label="Widok profilu '+(mode==='a'?'A':'B')+'"';
+ return title('COMPARE LAB','See the difference.','Przesuwaj palcem bezpośrednio po fotografii albo dotknij A lub B, aby zobaczyć cały kadr jednym stylem.')+
+ viewControl+
+ '<div class="compare touch-compare" id="compare" '+aria+'>'+
+ '<div class="layer" style="background-image:url('+chosenPhoto()+');filter:'+cssFilter(a.tone)+'"></div>'+
+ '<div class="layer after" id="after" style="background-image:url('+chosenPhoto()+');filter:'+cssFilter(b.tone)+';clip-path:'+comparisonClip(mode,S.split)+'"></div>'+
+ (mode==='split'?'<div class="divider" id="split-line" style="left:'+S.split+'%"></div><div class="handle" id="split-handle" style="left:'+S.split+'%">↔</div>':'')+
+ '<span class="toplabel left">'+esc(a.brand+' / '+a.title)+'</span><span class="toplabel right">'+esc(b.brand+' / '+b.title)+'</span></div>'+
+ (mode==='split'?'<input id="split-range" class="range" type="range" min="0" max="100" value="'+S.split+'" aria-label="Pozycja linii porównania, od 0 do 100 procent">':'<p class="small muted" style="margin:10px 0">Dotknij ikony ◫ A/B, aby wrócić do przesuwanego porównania.</p>')+
+ '<div class="tiles compare-profiles"><div class="field"><label>Profil A</label>'+select(S.left,'left')+'<button class="link" data-act="edit-left">Dostosuj A ✎</button></div>'+
+ '<div class="field"><label>Profil B</label>'+select(S.right,'right')+'<button class="link" data-act="edit-right">Dostosuj B ✎</button></div></div>'+
  '<div class="section-title"><h2>Twoje zdjęcie</h2><button class="link" data-act="import">Dodaj nowe ＋</button></div>'+
- '<div class="card pad">'+(photoOptions.length?photoOptions.map(a=>assetRow(a,true)).join(''):'<p class="small muted">Używamy demonstracyjnej fotografii. Dodaj własny JPEG lub PNG, aby porównać obie wersje tego samego kadru.</p>')+'</div>'+
- notice('Profesjonalna zgodność kolorystyczna będzie wymagała silnika ICC/DNG i kontrolowanego renderingu RAW. Filtry CSS pokazują interakcję, nie charakterystykę konkretnych aparatów.');
+ '<div class="card pad">'+(photoOptions.length?photoOptions.map(a=>assetRow(a,true)).join(''):'<p class="small muted">Używamy demonstracyjnego kadru. Dodaj własny JPG, PNG lub WebP — obie warstwy użyją dokładnie tego samego pliku.</p>')+'</div>'+
+ notice('Efekty są demonstracyjne (CSS), nie odtwarzają kalibracji aparatu ani profesjonalnego silnika RAW/ICC. Własne profile zapisujemy tylko na urządzeniu.');
+}
+function editor(){
+ const src=style(S.editId);
+ const tone=S.editTone||normalizeTone(src.tone);
+ const fields=TONE_FIELDS.map(f=>'<div class="editor-field"><div class="row"><label for="tone-'+f.key+'">'+esc(f.label)+'</label><output id="value-'+f.key+'">'+tone[f.key]+'</output></div>'+
+  '<input class="range" id="tone-'+f.key+'" data-tone="'+f.key+'" type="range" min="'+f.min+'" max="'+f.max+'" step="1" value="'+tone[f.key]+'"></div>').join('');
+ return title('COLOR EDITOR','Make it yours.','Edytuj wygląd i zapisz nową wersję jako własny profil. Oryginalny wzorzec pozostaje bez zmian.')+
+ '<div class="row"><span class="tag">Baza: '+esc(src.brand+' · '+src.title)+'</span><span class="badge">CSS · Preview</span></div>'+
+ '<div class="editor-preview" style="background-image:url('+chosenPhoto()+')"><div id="editor-effect" style="filter:'+cssFilter(tone)+';background-image:url('+chosenPhoto()+')"></div></div>'+
+ '<div class="field"><label for="custom-name">Nazwa Twojego profilu</label><input class="text-input" id="custom-name" type="text" maxlength="70" value="'+esc(S.editName)+'" placeholder="Np. Moja Leica Street"></div>'+
+ '<div class="card pad"><div class="row"><span class="tag">Parametry</span><button class="link" data-act="reset-tone">Przywróć bazę</button></div>'+fields+'</div>'+
+ '<div class="btnrow" style="margin-top:15px">'+btn('Zapisz jako mój profil','save-custom')+btn('Anuluj','editor-cancel',true)+'</div>'+
+ (src.brand==='Moje profile'?'<div style="margin-top:12px">'+btn('Usuń tę wersję z biblioteki','delete-custom',true)+'</div>':'')+
+ notice('* Temperatura i pozostałe suwaki to uproszczona wizualizacja CSS, a nie kalibracja WB w Kelvinach. Zapisany profil działa w PHOTO ATELIER; eksport XMP/NP3 będzie osobnym etapem.');
 }
 function academy(){
  return title('PHOTO ACADEMY','Learn to see.','Ośmiotygodniowa ścieżka od ekspozycji do świadomego zarządzania kolorem.')+
@@ -164,15 +227,12 @@ function portfolio(){
  '<div class="drop"><b>Twoja galeria zaczyna się od pierwszego kadru</b><small>Wybierz JPG lub PNG. Zapiszemy jego miniaturę, nie oryginał.</small><div style="margin-top:15px">'+btn('Dodaj zdjęcie','import')+'</div></div>');
 }
 function references(){
- const brands=[
- ['Hasselblad','HNCS, X2D, naturalność i tonalność'],
- ['Leica','M9 CCD, M11, reportage, Monochrom'],
- ['Kodak','Portra, Gold, Ektar, Tri-X'],
- ['Fujifilm','Provia, Velvia, Classic Chrome, Acros']
- ];
- return title('REFERENCE LIBRARY','Study the masters.','Encyklopedia kolorystyki, aparatów i emulsji fotograficznych.')+
- brands.map((b,i)=>'<div class="card pad" style="margin-bottom:10px"><span class="tag">COLLECTION 0'+(i+1)+'</span><h2 style="margin:7px 0">'+b[0]+'</h2><p class="small muted">'+b[1]+'</p><button class="link" style="margin-top:10px" data-act="brand-link" data-value="'+b[0]+'">Otwórz kolekcję →</button></div>').join('')+
- notice('Każda przyszła emulacja będzie miała źródło referencji, status odwzorowania i informację o licencji.');
+ return title('REFERENCE LIBRARY','Study the masters.','Kolekcje '+BRAND_INFO.length+' marek i systemów oraz dokumentacja ich kolorystyki.')+
+ BRAND_INFO.map((b,i)=>'<div class="card pad" style="margin-bottom:10px"><span class="tag">COLLECTION '+String(i+1).padStart(2,'0')+'</span>'+
+ '<div class="row"><h2 style="margin:7px 0">'+esc(b.brand)+'</h2><span class="badge">'+b.count+' profili</span></div>'+
+ '<p class="small muted">'+esc(b.family)+'</p><div class="row" style="margin-top:10px"><button class="link" data-act="brand-link" data-value="'+esc(b.brand)+'">Otwórz kolekcję →</button>'+
+ '<a class="ref-link" href="'+b.url+'" target="_blank" rel="noopener noreferrer">Dokumentacja ↗</a></div></div>').join('')+
+ notice('Nazwy kolekcji mają źródła producenckie, ale renderingi PHOTO ATELIER to autorskie wizualizacje CSS.');
 }
 function mentor(){
  return title('AI PHOTO MENTOR','The eye behind the frame.','Analiza kompozycji, światła i koloru z poszanowaniem prywatności Twoich fotografii.')+
@@ -190,7 +250,7 @@ function more(){
  return title('WORKSPACE','All your tools.','Dwanaście modułów profesjonalnego warsztatu fotograficznego oraz osobny katalog plików.')+
  '<div class="tiles">'+[['styles','Style Library','◉','Kolekcje barw'],['compare','Compare Lab','◫','Porównania A/B'],['academy','Photo Academy','✦','Lekcje i rozwój'],...MODS].map(m=>'<button class="tile" data-act="'+m[0]+'"><span class="glyph">'+m[2]+'</span><b>'+m[1]+'</b><small>'+m[3]+'</small></button>').join('')+'</div>';
 }
-const pages={home,styles:stylesPage,compare,academy,files:filesPage,lightroom,nikon,color,missions,mentor,portfolio,references,settings,more};
+const pages={home,styles:stylesPage,compare,editor,academy,files:filesPage,lightroom,nikon,color,missions,mentor,portfolio,references,settings,more};
 function draw(){
  document.body.classList.toggle('light',S.theme==='light');
  root.innerHTML=(pages[S.page]||home)();
@@ -222,7 +282,52 @@ document.addEventListener('click',async e=>{
  if(a==='brand'){S.brand=target.dataset.value;draw();return;}
  if(a==='brand-link'){S.brand=target.dataset.value;navTo('styles');return;}
  if(a==='file-filter'){S.fileFilter=target.dataset.value;draw();return;}
- if(a==='choose-style'){S.right=id;navTo('compare');return;}
+ if(a==='choose-style'){S.right=id;S.compareMode='split';navTo('compare');return;}
+ if(a==='edit-style'){S.editSlot='right';openEditor(id);return;}
+ if(a==='edit-left'){S.editSlot='left';openEditor(S.left);return;}
+ if(a==='edit-right'){S.editSlot='right';openEditor(S.right);return;}
+ if(a==='compare-mode'){S.compareMode=target.dataset.value;draw();return;}
+ if(a==='editor-cancel'){navTo(S.editBack==='compare'?'compare':'styles');return;}
+ if(a==='reset-tone'){S.editTone=normalizeTone(style(S.editId).tone);draw();return;}
+ if(a==='save-custom'){
+   const p=buildCustomProfile();
+   if(!p){toast('Wpisz nazwę profilu');return;}
+   if(S.customStyles.length>=100){toast('Limit 100 własnych profili');return;}
+   S.customStyles.push(p);
+   try{persistCustomStyles();}catch{S.customStyles.pop();toast('Nie udało się zapisać profilu');return;}
+   if(S.editBack==='compare'&&S.editSlot==='left')S.left=p.id;else S.right=p.id;
+   S.brand='Moje profile';navTo(S.editBack==='compare'?'compare':'styles');
+   toast('Zapisano własny profil na urządzeniu');return;
+ }
+ if(a==='delete-custom'){
+   if(style(S.editId).brand!=='Moje profile'||!confirm('Usunąć własny profil?'))return;
+   const before=S.customStyles;
+   S.customStyles=before.filter(p=>p.id!==S.editId);
+   try{persistCustomStyles();}catch{S.customStyles=before;toast('Błąd zapisu');return;}
+   if(S.left===S.editId)S.left='hass-natural';
+   if(S.right===S.editId)S.right='leica-classic';
+   S.brand='Moje profile';navTo('styles');toast('Usunięto profil');return;
+ }
+ if(a==='export-profiles'){
+   downloadJSON({format:'photo-atelier-profiles-v1',date:new Date().toISOString(),profiles:S.customStyles,
+     note:'Wizualizacje CSS, bez oryginalnych profili producentów'},'PHOTO_ATELIER_Moje_Profile.json');
+   toast('Zapisano plik kopii własnych profili');return;
+ }
+ if(a==='import-profiles'){
+   const f=document.createElement('input');f.type='file';f.accept='.json,application/json';
+   f.onchange=async()=>{
+     if(!f.files?.length)return;
+     try{
+       const d=JSON.parse(await f.files[0].text());
+       if(d.format!=='photo-atelier-profiles-v1'||!Array.isArray(d.profiles))throw Error('Nieobsługiwany plik');
+       const existing=new Set(S.customStyles.map(x=>x.id));
+       const addition=validateSavedProfiles(d.profiles).filter(x=>!existing.has(x.id)).slice(0,100-S.customStyles.length);
+       const before=S.customStyles;S.customStyles=[...before,...addition];
+       try{persistCustomStyles();}catch(e){S.customStyles=before;throw e;}
+       S.brand='Moje profile';S.styleQuery='';draw();toast('Zaimportowano '+addition.length+' profili');
+     }catch(err){toast('Błąd importu: '+err.message);}
+   };f.click();return;
+ }
  if(a==='lesson'){const n=Number(id);S.done=S.done.includes(n)?S.done.filter(x=>x!==n):[...S.done,n];saveProgress();draw();return;}
  if(a==='mission'){const n=Number(id);S.missions=S.missions.includes(n)?S.missions.filter(x=>x!==n):[...S.missions,n];saveProgress();draw();return;}
  if(a==='theme'){S.theme=target.dataset.value;localStorage.setItem('pa-theme',S.theme);draw();return;}
@@ -231,7 +336,15 @@ document.addEventListener('click',async e=>{
 });
 document.addEventListener('input',e=>{
  const t=e.target;
- if(t.id==='split-range'){S.split=Number(t.value);document.getElementById('after')?.style.setProperty('clip-path','inset(0 0 0 '+S.split+'%)');document.getElementById('split-line')?.style.setProperty('left',S.split+'%');document.getElementById('split-handle')?.style.setProperty('left',S.split+'%');}
+ if(t.id==='split-range'){S.split=Number(t.value);updateSplitUI();}
+ if(t.id==='style-search'){S.styleQuery=t.value;const el=document.getElementById('style-results');if(el)el.innerHTML=styleResults();}
+ if(t.id==='custom-name')S.editName=t.value;
+ if(t.dataset.tone){
+   if(!S.editTone)return;
+   S.editTone[t.dataset.tone]=Number(t.value);
+   document.getElementById('value-'+t.dataset.tone).textContent=t.value;
+   document.getElementById('editor-effect')?.style.setProperty('filter',cssFilter(S.editTone));
+ }
  if(t.id==='recipe-contrast'){S.recipeContrast=Number(t.value);document.getElementById('v-contrast').textContent=t.value;}
  if(t.id==='recipe-sat'){S.recipeSaturation=Number(t.value);document.getElementById('v-sat').textContent=t.value;}
 });
@@ -248,6 +361,35 @@ document.addEventListener('change',async e=>{
   try{const data=JSON.parse(await t.files[0].text());const n=await restoreCatalogue(data);await refresh();toast('Zaimportowano indeks: '+n+' rekordów');}
   catch(err){toast('Nie udało się wczytać indeksu: '+err.message);}
   t.value='';
+ }
+});
+let draggedPointer=null;
+function setSplitFromPointer(e,stage){
+ const rect=stage.getBoundingClientRect();
+ S.split=percentageFromPointer(e.clientX,rect.left,rect.width);
+ updateSplitUI();
+}
+document.addEventListener('pointerdown',e=>{
+ const stage=e.target.closest('#compare');
+ if(!stage||S.page!=='compare'||S.compareMode!=='split')return;
+ draggedPointer=e.pointerId;
+ try{stage.setPointerCapture(e.pointerId);}catch{}
+ setSplitFromPointer(e,stage);e.preventDefault();
+});
+document.addEventListener('pointermove',e=>{
+ if(draggedPointer!==e.pointerId||S.compareMode!=='split')return;
+ const stage=document.getElementById('compare');
+ if(stage){setSplitFromPointer(e,stage);e.preventDefault();}
+});
+function releaseSplit(e){if(draggedPointer!==e.pointerId)return;draggedPointer=null;}
+document.addEventListener('pointerup',releaseSplit);
+document.addEventListener('pointercancel',releaseSplit);
+document.addEventListener('keydown',e=>{
+ const stage=e.target.closest?.('#compare');
+ if(!stage||S.compareMode!=='split')return;
+ if(e.key==='ArrowLeft'||e.key==='ArrowRight'){
+  S.split=Math.max(0,Math.min(100,S.split+(e.key==='ArrowLeft'?-2:2)));
+  updateSplitUI();e.preventDefault();
  }
 });
 if('serviceWorker' in navigator && location.protocol==='https:') navigator.serviceWorker.register('/sw.js').catch(()=>{});
